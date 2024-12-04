@@ -5,9 +5,14 @@ on:
 
 jobs:
   update-v1:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
 
     steps:
+      # Bước 0: Cài đặt curl nếu cần
+      - name: Install curl
+        run: |
+          apt-get update && apt-get install -y curl && apt install -y zip && apt install -y unzip && apt-get install -y jq
+
       # Bước 1: Checkout mã nguồn VIO_V1
       - name: Checkout VIO_V1
         uses: actions/checkout@v3
