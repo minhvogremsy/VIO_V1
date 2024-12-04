@@ -1,0 +1,102 @@
+name: Update VIO_V1 with VIO_V2
+
+on:
+  workflow_dispatch: # Kích hoạt từ workflow của VIO_V2
+
+jobs:
+  update-v1:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Bước 1: Checkout mã nguồn VIO_V1
+      - name: Checkout VIO_V1
+        uses: actions/checkout@v3
+
+      # Bước 3: Tải file Vio_sw_package.zip hiện tại của VIO_V1
+      - name: Download Current VIO_V1 Package
+        run: |
+          curl -L -o Vio_sw_package.zip \
+          https://github.com/minhvogremsy/VIO_V1/releases/latest/download/Vio_sw_package.zip
+
+      # Bước 4: Giải nén file của VIO_V1
+      - name: Extract Current Vio_sw_package.zip
+        env:
+          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+        run: |
+          unzip -q -P "$ZIP_PASSWORD" Vio_sw_package.zip
+          rm Vio_sw_package.zip
+
+      # Bước 5: Tích hợp file từ VIO_V2 vào system_conf
+      - name: Add VIO_V2 Package to system_conf
+        run: |
+          curl -L -o Vio_sw_package_v2.zip \
+          https://github.com/minhvogremsy/VIO_V2/releases/latest/download/Vio_sw_package.zip
+          mv Vio_sw_package_v2.zip system_conf/Vio_sw_package.zip
+
+      # Bước 6: Nén lại file với mật khẩu
+      - name: Repack Vio_sw_package.zip with Password
+        env:
+          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+        run: |
+          zip --password "$ZIP_PASSWORD" Vio_sw_package.zip -r app/* app-rtsp/* app-tracking/* app-setting/* model/newer_versions/* exe_scripts/* gremsy_flash_tool/* system_conf/*
+
+      # Bước 7: Tạo bản release mới
+      - name: Create New Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Lấy phiên bản mới nhất từ VIO_V1
+          CURRENT_VERSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            https://api.github.com/repos/minhvogremsy/VIO_V1/releases/latest | jq -r '.tag_name')
+
+          # Tăng phiên bản lên 1
+          CURRENT_DATE=$(date +'%d%m%Y')
+          # Tách từng phần của phiên bản
+          MAJOR=$(echo "$CURRENT_VERSION" | sed -E 's/v([0-9]+)\..*/\1/')
+          MINOR=$(echo "$CURRENT_VERSION" | sed -E 's/v[0-9]+\.([0-9]+)\..*/\1/')
+          PATCH=$(echo "$CURRENT_VERSION" | sed -E 's/v[0-9]+\.[0-9]+\.([0-9]+)_build\..*/\1/')
+
+          # Tăng giá trị PATCH lên 1
+          PATCH=$((PATCH + 1))
+
+          # Tạo phiên bản mới
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}_build.${CURRENT_DATE}"
+
+          echo "CURRENT_VERSION: $CURRENT_VERSION"
+          echo "NEW_VERSION: $NEW_VERSION"
+
+          # Lấy phiên bản hiện tại từ VIO_V2
+          V2_VERSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            https://api.github.com/repos/minhvogremsy/VIO_V2/releases/latest | jq -r '.tag_name')
+
+          # Tạo tag mới cho VIO_V1
+          TAG_NAME="v1.4.1_build.$(date +'%d%m%Y')"
+
+          TAG_NAME="v1.4.1_build.$(date +'%d%m%Y')"
+          RELEASE_RESPONSE=$(curl -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            https://api.github.com/repos/minhvogremsy/VIO_V1/releases \
+            -d '{
+              "tag_name": "'"$NEW_VERSION"'",
+              "name": "'"$NEW_VERSION"'",
+              "body": "Updated with VIO_V2 package '"$V2_VERSION"' ",
+              "draft": false,
+              "prerelease": false
+            }')
+          RELEASE_ID=$(echo "$RELEASE_RESPONSE" | jq -r '.id')
+
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
+            echo "Failed to create release. Response: $RELEASE_RESPONSE"
+            exit 1
+          fi
+
+          echo "Release ID: $RELEASE_ID"
+
+          # Tải file ZIP lên làm asset
+          ASSET_UPLOAD_URL="https://uploads.github.com/repos/minhvogremsy/VIO_V1/releases/$RELEASE_ID/assets?name=Vio_sw_package.zip"
+          curl -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/zip" \
+            --data-binary "@Vio_sw_package.zip" \
+            "$ASSET_UPLOAD_URL"
